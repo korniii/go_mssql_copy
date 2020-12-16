@@ -3,14 +3,22 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	_ "github.com/denisenkom/go-mssqldb"
+	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/jmoiron/sqlx"
+	dynamicstruct "github.com/ompluscator/dynamic-struct"
 )
 
 type TableMetaData struct {
 	ColumnName 	string	`db:"COLUMN_NAME"`
 	DataType 	string 	`db:"DATA_TYPE"`
+}
+
+type Test struct {
+	Id int
+	RandString string
 }
 
 func main() {
@@ -29,41 +37,73 @@ func main() {
 	err = dbSource.Select(&metaData, "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'testdata' AND TABLE_SCHEMA='source'")
 	fmt.Println(metaData)
 
-	// 2.5 dynamic struct?
-
 	// 3. Get all table entries of source table
+	metaDataStructBuilder := dynamicstruct.NewStruct()
+	var columnNames []string 
 
-	// 4. Truncate destination table
+	for _, columnMetaData := range metaData {
+		metaDataStructBuilder.AddField(strings.ToUpper(columnMetaData.ColumnName), stringToDataType(columnMetaData.DataType), "");
+		columnNames = append(columnNames, columnMetaData.ColumnName)
+	}
+	
+	rows, err := dbSource.Queryx("SELECT * FROM source.testdata")
 
-	// 5. Insert into destination table (disable table rules)
+	var arrayOfValueSlices [][]interface{}
 
+	for rows.Next() {
+		slice, err := rows.SliceScan()
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		arrayOfValueSlices = append(arrayOfValueSlices, slice)
+	}
 
-	// m := map[string]interface{}{}
+	txn, err := dbSource.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// rows, err := dbSource.Queryx("SELECT * FROM source.testdata")
-	// for rows.Next() {
-	// 	err := rows.MapScan(m)
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	// 	// b, _ := json.Marshal(m)
-	// 	fmt.Println(len(m))
-	// 	y := "id"
-	// 	x := m[y]
-	// 	fmt.Println(x)
-	// 	// fmt.Println(string(b))
+	stmt, err := txn.Prepare(mssql.CopyIn("dest.testdata", mssql.BulkOptions{}, columnNames...))
+	if err != nil {
+		log.Fatal(err.Error())
+	}
 
-	// 	// err = json.Unmarshal(b, &instance)
-	// 	// if err != nil {
-	// 	// 	log.Fatal(err)
-	// 	// }
+	for _, valueSlice := range arrayOfValueSlices {
+		_, err = stmt.Exec(valueSlice ...)
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+	}
 
-	// 	// b, err = json.Marshal(instance)
-	// 	// if err != nil {
-	// 	// 	log.Fatal(err)
-	// 	// }
+	result, err := stmt.Exec()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// 	// fmt.Println(string(data))
-	// }
+	err = stmt.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	err = txn.Commit()
+	if err != nil {
+		log.Fatal(err)
+	}
+	rowCount, _ := result.RowsAffected()
+	log.Printf("%d row copied\n", rowCount)
+	log.Printf("bye\n")
+}
+
+func stringToDataType (stringifiedData string) interface{} {
+	switch stringifiedData {
+	case "int":
+		var v *int64
+		return v
+	case "varchar":
+		var v *string
+		return v;
+	default:
+		log.Fatalf("Datatype nit found")
+	}
+	return nil;
 }
