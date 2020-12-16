@@ -3,50 +3,58 @@ package main
 import (
 	"fmt"
 	"log"
-	"strings"
+	"os"
+	"strconv"
 
 	_ "github.com/denisenkom/go-mssqldb"
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/jmoiron/sqlx"
-	dynamicstruct "github.com/ompluscator/dynamic-struct"
+	"github.com/joho/godotenv"
 )
 
-type TableMetaData struct {
+// ColumnMetaData holds structred meta information of table columns / source -> INFORMATION_SCHEMA.COLUMNS
+type ColumnMetaData struct {
 	ColumnName 	string	`db:"COLUMN_NAME"`
 	DataType 	string 	`db:"DATA_TYPE"`
 }
 
-type Test struct {
-	Id int
-	RandString string
-}
+var (
+	err 		error = godotenv.Load() //initialize godot environment variables
 
+    server    	string = os.Getenv("SERVER") 
+    user      	string = os.Getenv("DB_USER")
+    password  	string = os.Getenv("DB_PASSWORD")
+	port     	string = os.Getenv("PORT")
+	database	string = os.Getenv("DATABASE")
+	source		string = os.Getenv("SOURCE")
+	destination	string = os.Getenv("DESTINATION")
+)
+
+//ToDo: panic if destination if prd or prod
 func main() {
-	dbSource, err := sqlx.Connect("mssql", "sqlserver://sa:Password!123@localhost:1433?database=test_db")
+	port, err := strconv.Atoi(port)
+	connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s", server, user, password, port, database)
+
+	dbSource, err := sqlx.Connect("mssql", connString)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	// 1. Get all tables from source schema
 	var tableNames []string;
-	dbSource.Select(&tableNames, "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'source'")
-	fmt.Println(tableNames)
+	dbSource.Select(&tableNames, fmt.Sprintf("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '%s'", source))
 
 	// 2. Get columnNames and dataType of table x
-	metaData := []TableMetaData{}
-	err = dbSource.Select(&metaData, "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'testdata' AND TABLE_SCHEMA='source'")
-	fmt.Println(metaData)
+	metaData := []ColumnMetaData{}
+	err = dbSource.Select(&metaData, fmt.Sprintf("SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'testdata' AND TABLE_SCHEMA='%s'", source))
 
-	// 3. Get all table entries of source table
-	metaDataStructBuilder := dynamicstruct.NewStruct()
 	var columnNames []string 
-
 	for _, columnMetaData := range metaData {
-		metaDataStructBuilder.AddField(strings.ToUpper(columnMetaData.ColumnName), stringToDataType(columnMetaData.DataType), "");
 		columnNames = append(columnNames, columnMetaData.ColumnName)
 	}
 	
-	rows, err := dbSource.Queryx("SELECT * FROM source.testdata")
+	// 3. Get all table entries of source table
+	rows, err := dbSource.Queryx(fmt.Sprintf("SELECT * FROM %s.testdata", source))
 
 	var arrayOfValueSlices [][]interface{}
 
@@ -58,12 +66,16 @@ func main() {
 		arrayOfValueSlices = append(arrayOfValueSlices, slice)
 	}
 
+	// Remove table columns from destination
+	dbSource.Exec(fmt.Sprintf("TRUNCATE TABLE %s.testdata", destination))
+
+	// Bulk insert 
 	txn, err := dbSource.Begin()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	stmt, err := txn.Prepare(mssql.CopyIn("dest.testdata", mssql.BulkOptions{}, columnNames...))
+	stmt, err := txn.Prepare(mssql.CopyIn(fmt.Sprintf("%s.testdata", destination), mssql.BulkOptions{}, columnNames...))
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -91,19 +103,4 @@ func main() {
 	}
 	rowCount, _ := result.RowsAffected()
 	log.Printf("%d row copied\n", rowCount)
-	log.Printf("bye\n")
-}
-
-func stringToDataType (stringifiedData string) interface{} {
-	switch stringifiedData {
-	case "int":
-		var v *int64
-		return v
-	case "varchar":
-		var v *string
-		return v;
-	default:
-		log.Fatalf("Datatype nit found")
-	}
-	return nil;
 }
