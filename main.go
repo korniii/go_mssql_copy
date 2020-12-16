@@ -14,20 +14,20 @@ import (
 
 // ColumnMetaData holds structred meta information of table columns / source -> INFORMATION_SCHEMA.COLUMNS
 type ColumnMetaData struct {
-	ColumnName 	string	`db:"COLUMN_NAME"`
-	DataType 	string 	`db:"DATA_TYPE"`
+	ColumnName string `db:"COLUMN_NAME"`
+	DataType   string `db:"DATA_TYPE"`
 }
 
 var (
-	err 		error = godotenv.Load() //initialize godot environment variables
+	err error = godotenv.Load() //initialize godot environment variables
 
-    server    	string = os.Getenv("SERVER") 
-    user      	string = os.Getenv("DB_USER")
-    password  	string = os.Getenv("DB_PASSWORD")
-	port     	string = os.Getenv("PORT")
-	database	string = os.Getenv("DATABASE")
-	source		string = os.Getenv("SOURCE")
-	destination	string = os.Getenv("DESTINATION")
+	server      string = os.Getenv("SERVER")
+	user        string = os.Getenv("DB_USER")
+	password    string = os.Getenv("DB_PASSWORD")
+	port        string = os.Getenv("PORT")
+	database    string = os.Getenv("DATABASE")
+	source      string = os.Getenv("SOURCE")
+	destination string = os.Getenv("DESTINATION")
 )
 
 //ToDo: panic if destination if prd or prod
@@ -41,18 +41,18 @@ func main() {
 	}
 
 	// 1. Get all tables from source schema
-	var tableNames []string;
+	var tableNames []string
 	dbSource.Select(&tableNames, fmt.Sprintf("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '%s'", source))
 
 	// 2. Get columnNames and dataType of table x
 	metaData := []ColumnMetaData{}
 	err = dbSource.Select(&metaData, fmt.Sprintf("SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'testdata' AND TABLE_SCHEMA='%s'", source))
 
-	var columnNames []string 
+	var columnNames []string
 	for _, columnMetaData := range metaData {
 		columnNames = append(columnNames, columnMetaData.ColumnName)
 	}
-	
+
 	// 3. Get all table entries of source table
 	rows, err := dbSource.Queryx(fmt.Sprintf("SELECT * FROM %s.testdata", source))
 
@@ -69,7 +69,7 @@ func main() {
 	// Remove table columns from destination
 	dbSource.Exec(fmt.Sprintf("TRUNCATE TABLE %s.testdata", destination))
 
-	// Bulk insert 
+	// Bulk insert
 	txn, err := dbSource.Begin()
 	if err != nil {
 		log.Fatal(err)
@@ -81,7 +81,7 @@ func main() {
 	}
 
 	for _, valueSlice := range arrayOfValueSlices {
-		_, err = stmt.Exec(valueSlice ...)
+		_, err = stmt.Exec(valueSlice...)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
