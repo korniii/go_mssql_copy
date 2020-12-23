@@ -7,20 +7,27 @@
 -- CREATE SCHEMA [dest]
 
 -- USE test_db
+-- DROP TABLE [source].testdata
+-- DROP TABLE [dest].testdata
+
+-- USE test_db
 -- CREATE TABLE [source].testdata (
 --    id int,
---    rand_string varchar(255) 
+--    rand_string varchar(255),
+--    rand_decimal decimal(5,2),
+--    rand_bit bit
 -- )
 
 -- CREATE TABLE [dest].testdata
 -- (
 --     id int,
---     rand_string varchar(255)
+--     rand_string varchar(255),
+--     rand_decimal decimal(5,2),
+--     rand_bit bit
 -- )
 
--- INSERT INTO [source].testdata (id, rand_string)
--- VALUES (1, 'abc'), (2, 'def'), (3, 'ghi')
-
+INSERT INTO [source].testdata (id, rand_string, rand_decimal, rand_bit)
+VALUES (1, 'abc', 1.0, 0), (2, 'def', 2.0, 1), (3, 'ghi', -3.0, 1)
 -- SELECT
 --     *
 -- FROM

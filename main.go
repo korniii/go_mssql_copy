@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -10,12 +11,15 @@ import (
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
+
 )
 
 // ColumnMetaData holds structred meta information of table columns / source -> INFORMATION_SCHEMA.COLUMNS
 type ColumnMetaData struct {
-	ColumnName string `db:"COLUMN_NAME"`
-	DataType   string `db:"DATA_TYPE"`
+	ColumnName 			string 			`db:"COLUMN_NAME"`
+	DataType 			string 			`db:"DATA_TYPE"`
+	NumericPrecision	sql.NullInt32 	`db:"NUMERIC_PRECISION"`
+	NumericScale		sql.NullInt32 	`db:"NUMERIC_SCALE"`
 }
 
 var (
@@ -30,7 +34,7 @@ var (
 	destination string = os.Getenv("DESTINATION")
 )
 
-//ToDo: panic if destination if prd or prod
+//ToDo: panic if destination is prd or prod
 func main() {
 	port, err := strconv.Atoi(port)
 	connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s", server, user, password, port, database)
@@ -46,7 +50,10 @@ func main() {
 
 	// 2. Get columnNames and dataType of table x
 	metaData := []ColumnMetaData{}
-	err = dbSource.Select(&metaData, fmt.Sprintf("SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'testdata' AND TABLE_SCHEMA='%s'", source))
+	err = dbSource.Select(&metaData, fmt.Sprintf("SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'testdata' AND TABLE_SCHEMA='%s'", source))
+
+	fmt.Println(metaData)
+	fmt.Println("LA")
 
 	var columnNames []string
 	for _, columnMetaData := range metaData {
@@ -65,6 +72,7 @@ func main() {
 		}
 		arrayOfValueSlices = append(arrayOfValueSlices, slice)
 	}
+	fmt.Println(arrayOfValueSlices)
 
 	// Remove table columns from destination
 	dbSource.Exec(fmt.Sprintf("TRUNCATE TABLE %s.testdata", destination))
@@ -81,6 +89,14 @@ func main() {
 	}
 
 	for _, valueSlice := range arrayOfValueSlices {
+
+		for idx, val := range valueSlice {
+			if idx == 2 {
+				valT := val.([]byte)
+				fmt.Println(string(valT))
+				valueSlice[2] = string(valT)
+			}
+		}
 		_, err = stmt.Exec(valueSlice...)
 		if err != nil {
 			log.Fatal(err.Error())
