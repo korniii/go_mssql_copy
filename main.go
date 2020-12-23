@@ -11,7 +11,6 @@ import (
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
-
 )
 
 // ColumnMetaData holds structred meta information of table columns / source -> INFORMATION_SCHEMA.COLUMNS
@@ -91,12 +90,12 @@ func main() {
 	for _, valueSlice := range arrayOfValueSlices {
 
 		for idx, val := range valueSlice {
-			if idx == 2 {
-				valT := val.([]byte)
-				fmt.Println(string(valT))
-				valueSlice[2] = string(valT)
+			switch v := val.(type) {
+			case []byte: valueSlice[idx] = string(v) //used to convert decimals since mssql driver cant consume raw []byte
+			default: 
 			}
 		}
+
 		_, err = stmt.Exec(valueSlice...)
 		if err != nil {
 			log.Fatal(err.Error())
