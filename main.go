@@ -51,9 +51,6 @@ func main() {
 	metaData := []ColumnMetaData{}
 	err = dbSource.Select(&metaData, fmt.Sprintf("SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'testdata' AND TABLE_SCHEMA='%s'", source))
 
-	fmt.Println(metaData)
-	fmt.Println("LA")
-
 	var columnNames []string
 	for _, columnMetaData := range metaData {
 		columnNames = append(columnNames, columnMetaData.ColumnName)
@@ -71,10 +68,16 @@ func main() {
 		}
 		arrayOfValueSlices = append(arrayOfValueSlices, slice)
 	}
-	fmt.Println(arrayOfValueSlices)
 
-	// Remove table columns from destination
-	dbSource.Exec(fmt.Sprintf("TRUNCATE TABLE %s.testdata", destination))
+	// !!!might be better performance wise to remove all constraints truncate and re-add contrains
+	// disable all constraints
+	dbSource.Exec(fmt.Sprintf("ALTER TABLE %s.%s NOCHECK CONSTRAINT all", destination, "testdata"))
+
+	// delte data in table
+	dbSource.Exec(fmt.Sprintf("DELETE FROM %s.%s", destination, "testdata"))
+
+	// enable all constraints
+	dbSource.Exec(fmt.Sprintf("ALTER TABLE %s.%s WITH CHECK CHECK CONSTRAINT all", destination, "testdata"))
 
 	// Bulk insert
 	txn, err := dbSource.Begin()
