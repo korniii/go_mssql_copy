@@ -54,11 +54,25 @@ func main() {
 	dbSource.Select(&tableNames, fmt.Sprintf("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '%s'", source))
 
 	for _, tableName := range tableNames {
+		// !!!might be better performance wise to remove all constraints truncate and re-add contrains
+		// disable all constraints
+		dbDestination.Exec(fmt.Sprintf("ALTER TABLE %s.%s NOCHECK CONSTRAINT all", destination, tableName))
+	}
+
+	for _, tableName := range tableNames {
 		copyDataToDestinationTable(dbSource, dbDestination, tableName)
+	}
+
+	for _, tableName := range tableNames {
+		// enable all constraints
+		dbDestination.Exec(fmt.Sprintf("ALTER TABLE %s.%s WITH CHECK CHECK CONSTRAINT all", destination, tableName))
 	}
 }
 
 func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, tableName string) {
+	// delete data in destination table
+	dbDestination.Exec(fmt.Sprintf("DELETE FROM %s.%s", destination, tableName))
+
 	// 2. Get columnNames and dataType of table x
 	metaData := []ColumnMetaData{}
 	err = dbSource.Select(&metaData, fmt.Sprintf("SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '%s' AND TABLE_SCHEMA='%s'", tableName, source))
@@ -80,16 +94,6 @@ func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, table
 		}
 		arrayOfValueSlices = append(arrayOfValueSlices, slice)
 	}
-
-	// !!!might be better performance wise to remove all constraints truncate and re-add contrains
-	// disable all constraints
-	dbDestination.Exec(fmt.Sprintf("ALTER TABLE %s.%s NOCHECK CONSTRAINT all", destination, tableName))
-
-	// delete data in table
-	dbDestination.Exec(fmt.Sprintf("DELETE FROM %s.%s", destination, tableName))
-
-	// enable all constraints
-	dbDestination.Exec(fmt.Sprintf("ALTER TABLE %s.%s WITH CHECK CHECK CONSTRAINT all", destination, tableName))
 
 	// Bulk insert
 	txn, err := dbSource.Begin()
