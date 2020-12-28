@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 
-	_ "github.com/denisenkom/go-mssqldb"
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
@@ -36,20 +35,33 @@ var (
 //ToDo: panic if destination is prd or prod
 func main() {
 	port, err := strconv.Atoi(port)
-	connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s", server, user, password, port, database)
+	connStringSource := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s", server, user, password, port, database)
 
-	dbSource, err := sqlx.Connect("mssql", connString)
+	dbSource, err := sqlx.Connect("mssql", connStringSource)
 	if err != nil {
 		log.Fatalln(err)
 	}
+
+	connStringDestination := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s", server, user, password, port, database)
+
+	dbDestination, err := sqlx.Connect("mssql", connStringDestination)
+	if err != nil {
+		log.Fatalln(err)
+	}	
 
 	// 1. Get all tables from source schema
 	var tableNames []string
 	dbSource.Select(&tableNames, fmt.Sprintf("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '%s'", source))
 
+	for _, tableName := range tableNames {
+		copyDataToDestinationTable(dbSource, dbDestination, tableName)
+	}
+}
+
+func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, tableName string) {
 	// 2. Get columnNames and dataType of table x
 	metaData := []ColumnMetaData{}
-	err = dbSource.Select(&metaData, fmt.Sprintf("SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'testdata' AND TABLE_SCHEMA='%s'", source))
+	err = dbSource.Select(&metaData, fmt.Sprintf("SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '%s' AND TABLE_SCHEMA='%s'", tableName, source))
 
 	var columnNames []string
 	for _, columnMetaData := range metaData {
@@ -57,7 +69,7 @@ func main() {
 	}
 
 	// 3. Get all table entries of source table
-	rows, err := dbSource.Queryx(fmt.Sprintf("SELECT * FROM %s.testdata", source))
+	rows, err := dbSource.Queryx(fmt.Sprintf("SELECT * FROM %s.%s", source, tableName))
 
 	var arrayOfValueSlices [][]interface{}
 
@@ -71,13 +83,13 @@ func main() {
 
 	// !!!might be better performance wise to remove all constraints truncate and re-add contrains
 	// disable all constraints
-	dbSource.Exec(fmt.Sprintf("ALTER TABLE %s.%s NOCHECK CONSTRAINT all", destination, "testdata"))
+	dbDestination.Exec(fmt.Sprintf("ALTER TABLE %s.%s NOCHECK CONSTRAINT all", destination, tableName))
 
-	// delte data in table
-	dbSource.Exec(fmt.Sprintf("DELETE FROM %s.%s", destination, "testdata"))
+	// delete data in table
+	dbDestination.Exec(fmt.Sprintf("DELETE FROM %s.%s", destination, tableName))
 
 	// enable all constraints
-	dbSource.Exec(fmt.Sprintf("ALTER TABLE %s.%s WITH CHECK CHECK CONSTRAINT all", destination, "testdata"))
+	dbDestination.Exec(fmt.Sprintf("ALTER TABLE %s.%s WITH CHECK CHECK CONSTRAINT all", destination, tableName))
 
 	// Bulk insert
 	txn, err := dbSource.Begin()
@@ -85,7 +97,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	stmt, err := txn.Prepare(mssql.CopyIn(fmt.Sprintf("%s.testdata", destination), mssql.BulkOptions{}, columnNames...))
+	stmt, err := txn.Prepare(mssql.CopyIn(fmt.Sprintf("%s.%s", destination, tableName), mssql.BulkOptions{}, columnNames...))
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -120,5 +132,5 @@ func main() {
 		log.Fatal(err)
 	}
 	rowCount, _ := result.RowsAffected()
-	log.Printf("%d row copied\n", rowCount)
+	log.Printf("%d row copied\n", rowCount)	
 }
