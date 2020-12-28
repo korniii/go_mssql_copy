@@ -14,10 +14,10 @@ import (
 
 // ColumnMetaData holds structred meta information of table columns / source -> INFORMATION_SCHEMA.COLUMNS
 type ColumnMetaData struct {
-	ColumnName 			string 			`db:"COLUMN_NAME"`
-	DataType 			string 			`db:"DATA_TYPE"`
-	NumericPrecision	sql.NullInt32 	`db:"NUMERIC_PRECISION"`
-	NumericScale		sql.NullInt32 	`db:"NUMERIC_SCALE"`
+	ColumnName       string        `db:"COLUMN_NAME"`
+	DataType         string        `db:"DATA_TYPE"`
+	NumericPrecision sql.NullInt32 `db:"NUMERIC_PRECISION"`
+	NumericScale     sql.NullInt32 `db:"NUMERIC_SCALE"`
 }
 
 var (
@@ -47,7 +47,7 @@ func main() {
 	dbDestination, err := sqlx.Connect("mssql", connStringDestination)
 	if err != nil {
 		log.Fatalln(err)
-	}	
+	}
 
 	// 1. Get all tables from source schema
 	var tableNames []string
@@ -110,8 +110,9 @@ func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, table
 
 		for idx, val := range valueSlice {
 			switch v := val.(type) {
-			case []byte: valueSlice[idx] = string(v) //used to convert decimals since mssql driver cant consume raw []byte
-			default: 
+			case []byte:
+				valueSlice[idx] = string(v) //used to convert decimals since mssql driver cant consume raw []byte
+			default:
 			}
 		}
 
@@ -136,5 +137,5 @@ func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, table
 		log.Fatal(err)
 	}
 	rowCount, _ := result.RowsAffected()
-	log.Printf("%d row copied\n", rowCount)	
+	log.Printf("%d row copied\n", rowCount)
 }
