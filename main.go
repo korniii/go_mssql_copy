@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
+	"time"
 
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/jmoiron/sqlx"
@@ -34,6 +36,8 @@ var (
 
 //ToDo: panic if destination is prd or prod
 func main() {
+	start := time.Now()
+
 	port, err := strconv.Atoi(port)
 	connStringSource := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s", server, user, password, port, database)
 
@@ -49,6 +53,13 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	//cap max exectuted go routines with channel
+	maxGoroutines := 5
+	goRoutineThreshold := make(chan struct{}, maxGoroutines)
+
+	var wg sync.WaitGroup
+
+
 	// 1. Get all tables from source schema
 	var tableNames []string
 	dbSource.Select(&tableNames, fmt.Sprintf("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '%s'", source))
@@ -59,17 +70,29 @@ func main() {
 		dbDestination.Exec(fmt.Sprintf("ALTER TABLE %s.%s NOCHECK CONSTRAINT all", destination, tableName))
 	}
 
-	for _, tableName := range tableNames {
-		copyDataToDestinationTable(dbSource, dbDestination, tableName)
+	for i := 0; i < len(tableNames); i++ {
+		goRoutineThreshold <- struct{}{}
+		wg.Add(1)
+		go func(n int){
+			log.Println("Copying table -> ", tableNames[n])
+			copyDataToDestinationTable(dbSource, dbDestination, &wg, tableNames[n])
+			<-goRoutineThreshold
+		} (i)
 	}
+
+	wg.Wait()
 
 	for _, tableName := range tableNames {
 		// enable all constraints
 		dbDestination.Exec(fmt.Sprintf("ALTER TABLE %s.%s WITH CHECK CHECK CONSTRAINT all", destination, tableName))
 	}
+
+	log.Println("finished copying data in", time.Since(start).Seconds(), "seconds")	
 }
 
-func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, tableName string) {
+func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, wg *sync.WaitGroup, tableName string) {
+	defer wg.Done()
+
 	// delete data in destination table
 	dbDestination.Exec(fmt.Sprintf("DELETE FROM %s.%s", destination, tableName))
 
