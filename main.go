@@ -12,6 +12,8 @@ import (
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
+	"github.com/vbauerster/mpb/v5"
+	"github.com/vbauerster/mpb/v5/decor"
 )
 
 // ColumnMetaData holds structred meta information of table columns / source -> INFORMATION_SCHEMA.COLUMNS
@@ -54,11 +56,12 @@ func main() {
 	}
 
 	//cap max exectuted go routines with channel
-	maxGoroutines := 5
+	maxGoroutines := 2
 	goRoutineThreshold := make(chan struct{}, maxGoroutines)
 
 	var wg sync.WaitGroup
-
+	// initialize progress bar together with WaitGroup
+	p := mpb.New(mpb.WithWaitGroup(&wg))
 
 	// 1. Get all tables from source schema
 	var tableNames []string
@@ -73,11 +76,29 @@ func main() {
 	for i := 0; i < len(tableNames); i++ {
 		goRoutineThreshold <- struct{}{}
 		wg.Add(1)
-		go func(n int){
-			log.Println("Copying table -> ", tableNames[n])
-			copyDataToDestinationTable(dbSource, dbDestination, &wg, tableNames[n])
+
+		name := fmt.Sprintf("Table#%s:", tableNames[i])
+
+		bar := p.AddBar(int64(100),
+			mpb.PrependDecorators(
+				// simple name decorator
+				decor.Name(name, decor.WC{W: 20, C: decor.DidentRight}), // TODO: W should be len() longest tableName
+				// decor.DSyncWidth bit enables column width synchronization
+				decor.Percentage(decor.WCSyncSpace),
+			),
+			mpb.AppendDecorators(
+				// replace ETA decorator with "done" message, OnComplete event
+				decor.OnComplete(
+					// ETA decorator with ewma age of 60
+					decor.EwmaETA(decor.ET_STYLE_GO, 60), "done",
+				),
+			),
+		)
+
+		go func(n int) {
+			copyDataToDestinationTable(dbSource, dbDestination, &wg, bar, tableNames[n])
 			<-goRoutineThreshold
-		} (i)
+		}(i)
 	}
 
 	wg.Wait()
@@ -87,11 +108,16 @@ func main() {
 		dbDestination.Exec(fmt.Sprintf("ALTER TABLE %s.%s WITH CHECK CHECK CONSTRAINT all", destination, tableName))
 	}
 
-	log.Println("finished copying data in", time.Since(start).Seconds(), "seconds")	
+	log.Println("finished copying data in", time.Since(start).Seconds(), "seconds")
 }
 
-func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, wg *sync.WaitGroup, tableName string) {
+func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, wg *sync.WaitGroup, bar *mpb.Bar, tableName string) {
 	defer wg.Done()
+
+	for j := 0; j < 100; j++ {
+		time.Sleep(time.Second)
+		bar.Increment()
+	}
 
 	// delete data in destination table
 	dbDestination.Exec(fmt.Sprintf("DELETE FROM %s.%s", destination, tableName))
