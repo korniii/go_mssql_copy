@@ -12,8 +12,7 @@ import (
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
-	"github.com/vbauerster/mpb/v5"
-	"github.com/vbauerster/mpb/v5/decor"
+	"github.com/schollz/progressbar/v3"
 )
 
 // ColumnMetaData holds structred meta information of table columns / source -> INFORMATION_SCHEMA.COLUMNS
@@ -34,6 +33,10 @@ var (
 	database    string = os.Getenv("DATABASE")
 	source      string = os.Getenv("SOURCE")
 	destination string = os.Getenv("DESTINATION")
+
+	bulkOptions mssql.BulkOptions = mssql.BulkOptions{
+		RowsPerBatch: 10000,
+	}
 )
 
 //ToDo: panic if destination is prd or prod
@@ -60,12 +63,24 @@ func main() {
 	goRoutineThreshold := make(chan struct{}, maxGoroutines)
 
 	var wg sync.WaitGroup
-	// initialize progress bar together with WaitGroup
-	p := mpb.New(mpb.WithWaitGroup(&wg))
 
 	// 1. Get all tables from source schema
 	var tableNames []string
 	dbSource.Select(&tableNames, fmt.Sprintf("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '%s'", source))
+
+	// initialize progress bar
+	bar := progressbar.NewOptions(len(tableNames),
+		progressbar.OptionSetDescription("Copying tables ..."),
+		progressbar.OptionSetPredictTime(false),
+		progressbar.OptionFullWidth(),
+		progressbar.OptionShowCount(),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionSetTheme(progressbar.Theme{
+        Saucer:        "[green]#[reset]",
+        SaucerPadding: " ",
+        BarStart:      "[",
+        BarEnd:        "]",
+    }))
 
 	for _, tableName := range tableNames {
 		// !!!might be better performance wise to remove all constraints truncate and re-add contrains
@@ -77,26 +92,9 @@ func main() {
 		goRoutineThreshold <- struct{}{}
 		wg.Add(1)
 
-		name := fmt.Sprintf("Table#%s:", tableNames[i])
-
-		bar := p.AddBar(int64(100),
-			mpb.PrependDecorators(
-				// simple name decorator
-				decor.Name(name, decor.WC{W: 20, C: decor.DidentRight}), // TODO: W should be len() longest tableName
-				// decor.DSyncWidth bit enables column width synchronization
-				decor.Percentage(decor.WCSyncSpace),
-			),
-			mpb.AppendDecorators(
-				// replace ETA decorator with "done" message, OnComplete event
-				decor.OnComplete(
-					// ETA decorator with ewma age of 60
-					decor.EwmaETA(decor.ET_STYLE_GO, 60), "done",
-				),
-			),
-		)
-
 		go func(n int) {
-			copyDataToDestinationTable(dbSource, dbDestination, &wg, bar, tableNames[n])
+			copyDataToDestinationTable(dbSource, dbDestination, &wg, tableNames[n])
+			bar.Add(1)
 			<-goRoutineThreshold
 		}(i)
 	}
@@ -111,13 +109,8 @@ func main() {
 	log.Println("finished copying data in", time.Since(start).Seconds(), "seconds")
 }
 
-func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, wg *sync.WaitGroup, bar *mpb.Bar, tableName string) {
+func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, wg *sync.WaitGroup, tableName string) {
 	defer wg.Done()
-
-	for j := 0; j < 100; j++ {
-		time.Sleep(time.Second)
-		bar.Increment()
-	}
 
 	// delete data in destination table
 	dbDestination.Exec(fmt.Sprintf("DELETE FROM %s.%s", destination, tableName))
@@ -150,7 +143,7 @@ func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, wg *s
 		log.Fatal(err)
 	}
 
-	stmt, err := txn.Prepare(mssql.CopyIn(fmt.Sprintf("%s.%s", destination, tableName), mssql.BulkOptions{}, columnNames...))
+	stmt, err := txn.Prepare(mssql.CopyIn(fmt.Sprintf("%s.%s", destination, tableName), bulkOptions, columnNames...))
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -171,7 +164,7 @@ func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, wg *s
 		}
 	}
 
-	result, err := stmt.Exec()
+	_, err = stmt.Exec()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -185,6 +178,4 @@ func copyDataToDestinationTable(dbSource *sqlx.DB, dbDestination *sqlx.DB, wg *s
 	if err != nil {
 		log.Fatal(err)
 	}
-	rowCount, _ := result.RowsAffected()
-	log.Printf("%d row copied\n", rowCount)
 }
