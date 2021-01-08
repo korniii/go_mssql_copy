@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,8 @@ type ColumnMetaData struct {
 // ToDo: Load dotenv only in local mode e.g. with flag
 // ToDo: EnvVar for ignored tables
 var (
+	forbiddenDestinations = []string{"prd", "prod", "production"}
+
 	err error = godotenv.Load() //initialize godot environment variables
 
 	server      string = os.Getenv("SERVER")
@@ -41,9 +44,15 @@ var (
 	}
 )
 
-//ToDo: panic if destination is prd or prod
 func main() {
 	start := time.Now()
+
+	for _, forbiddenDestination := range forbiddenDestinations {
+		if strings.EqualFold(destination, forbiddenDestination) {
+			panic(fmt.Sprintf(`You are not allowed to copy data to the following destinations: %v
+	This is a safeguard, adjust the source code if needed.`, forbiddenDestinations))
+		}
+	}
 
 	port, err := strconv.Atoi(port)
 	connStringSource := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s", server, user, password, port, database)
@@ -78,11 +87,11 @@ func main() {
 		progressbar.OptionShowCount(),
 		progressbar.OptionEnableColorCodes(true),
 		progressbar.OptionSetTheme(progressbar.Theme{
-        Saucer:        "[green]#[reset]",
-        SaucerPadding: " ",
-        BarStart:      "[",
-        BarEnd:        "]",
-    }))
+			Saucer:        "[green]#[reset]",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}))
 
 	for _, tableName := range tableNames {
 		// !!!might be better performance wise to remove all constraints truncate and re-add contrains
