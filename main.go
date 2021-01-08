@@ -23,6 +23,8 @@ type ColumnMetaData struct {
 	NumericScale     sql.NullInt32 `db:"NUMERIC_SCALE"`
 }
 
+// ToDo: Load dotenv only in local mode e.g. with flag
+// ToDo: EnvVar for ignored tables
 var (
 	err error = godotenv.Load() //initialize godot environment variables
 
@@ -35,7 +37,7 @@ var (
 	destination string = os.Getenv("DESTINATION")
 
 	bulkOptions mssql.BulkOptions = mssql.BulkOptions{
-		RowsPerBatch: 10000,
+		RowsPerBatch: 200,
 	}
 )
 
@@ -59,7 +61,7 @@ func main() {
 	}
 
 	//cap max exectuted go routines with channel
-	maxGoroutines := 2
+	maxGoroutines := 5
 	goRoutineThreshold := make(chan struct{}, maxGoroutines)
 
 	var wg sync.WaitGroup
